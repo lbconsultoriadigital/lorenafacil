@@ -98,7 +98,6 @@ export function LorenaApp() {
   const [photoName, setPhotoName] = useState("");
   const [floatingXp, setFloatingXp] = useState("");
   const [hydrated, setHydrated] = useState(false);
-  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
 
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
@@ -129,7 +128,6 @@ export function LorenaApp() {
     voiceRequestIdRef.current += 1;
     voiceRequestAbortRef.current?.abort();
     voiceRequestAbortRef.current = null;
-    window.speechSynthesis?.cancel();
     clearCurrentAudio();
   }, [clearCurrentAudio]);
 
@@ -179,19 +177,6 @@ export function LorenaApp() {
       }),
     );
   }, [completedMissionIds, hydrated, isVoiceEnabled, messages, rewardRequests, streak, unlockedStickerIds, xp]);
-
-  useEffect(() => {
-    if (!("speechSynthesis" in window)) return;
-
-    const loadVoices = () => setAvailableVoices(window.speechSynthesis.getVoices());
-    loadVoices();
-    window.speechSynthesis.onvoiceschanged = loadVoices;
-
-    return () => {
-      stopTutorVoice();
-      window.speechSynthesis.onvoiceschanged = null;
-    };
-  }, [stopTutorVoice]);
 
   useEffect(() => {
     return () => {
@@ -567,35 +552,12 @@ export function LorenaApp() {
       await playAudioBlob(audioBlob, requestId);
     } catch {
       if (controller.signal.aborted || !isVoiceRequestActive(requestId)) return;
-      speakWithBrowserVoice(textToRead, requestId);
+      setVoiceHint("Voz premium indisponível. Atualize a chave Gemini para ouvir.");
     } finally {
       if (voiceRequestAbortRef.current === controller) {
         voiceRequestAbortRef.current = null;
       }
     }
-  }
-
-  function speakWithBrowserVoice(textToRead: string, requestId: number) {
-    if (!isVoiceRequestActive(requestId)) return;
-    if (!("speechSynthesis" in window)) return;
-
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(textToRead);
-    const voices = availableVoices.length ? availableVoices : window.speechSynthesis.getVoices();
-    const voice = pickVoice(voices);
-    if (voice) utterance.voice = voice;
-    utterance.lang = voice?.lang || "pt-BR";
-    utterance.rate = 0.92;
-    utterance.pitch = 1.05;
-    utterance.volume = 1;
-    utterance.onend = () => {
-      if (isVoiceRequestActive(requestId)) setVoiceHint("Resposta pronta. Toque no alto-falante para ouvir de novo.");
-    };
-    utterance.onerror = () => {
-      if (isVoiceRequestActive(requestId)) setVoiceHint("Não consegui tocar a voz agora.");
-    };
-    window.speechSynthesis.speak(utterance);
-    setVoiceHint("Tocando resposta...");
   }
 
   function playAudioBlob(audioBlob: Blob, requestId: number) {
@@ -1302,28 +1264,6 @@ function cleanForSpeech(text: string) {
     .replace(/^\s*[-•]\s*/gm, "")
     .replace(/\s+/g, " ")
     .slice(0, 1100);
-}
-
-function pickVoice(voices: SpeechSynthesisVoice[]) {
-  if (!voices.length) return null;
-
-  return [...voices].sort((voiceA, voiceB) => scoreVoice(voiceB) - scoreVoice(voiceA))[0] ?? null;
-}
-
-function scoreVoice(voice: SpeechSynthesisVoice) {
-  const label = `${voice.name} ${voice.lang}`.toLowerCase();
-  let score = 0;
-
-  if (voice.lang.toLowerCase() === "pt-br") score += 100;
-  else if (voice.lang.toLowerCase().startsWith("pt")) score += 70;
-
-  if (label.includes("google")) score += 18;
-  if (label.includes("microsoft")) score += 16;
-  if (label.includes("luciana") || label.includes("maria") || label.includes("francisca")) score += 12;
-  if (label.includes("premium") || label.includes("enhanced") || label.includes("natural")) score += 10;
-  if (voice.localService) score += 4;
-
-  return score;
 }
 
 async function prepareImage(file: File): Promise<PreparedImage> {
