@@ -1,7 +1,7 @@
-import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
+import { mutation, query } from "./_generated/server";
 
-export const listStickers = queryGeneric({
+export const listStickers = query({
   args: {
     studentSlug: v.optional(v.string()),
   },
@@ -24,7 +24,7 @@ export const listStickers = queryGeneric({
   },
 });
 
-export const unlockSticker = mutationGeneric({
+export const unlockSticker = mutation({
   args: {
     studentSlug: v.string(),
     stickerId: v.string(),
@@ -33,9 +33,8 @@ export const unlockSticker = mutationGeneric({
     const existing = await ctx.db
       .query("stickerUnlocks")
       .withIndex("by_student_sticker", (q) =>
-        q.eq("studentSlug", args.studentSlug),
+        q.eq("studentSlug", args.studentSlug).eq("stickerId", args.stickerId),
       )
-      .filter((q) => q.eq(q.field("stickerId"), args.stickerId))
       .first();
 
     if (existing) return existing._id;

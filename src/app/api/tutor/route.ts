@@ -4,6 +4,8 @@ import { fallbackAgentReply, getAgentPrompt } from "@/lib/agents";
 import type { SubjectId } from "@/lib/lorena-data";
 
 const GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_TUTOR_TIMEOUT_MS = 22000;
+const MAX_INLINE_MEDIA_CHARS = 7_000_000;
 type TutorMode = "text" | "photo" | "voice";
 type InlineMedia = { mimeType: string; data: string };
 
@@ -20,6 +22,7 @@ function sanitizeInlineMedia(value: unknown): InlineMedia | null {
   const media = value as { mimeType?: unknown; data?: unknown };
   if (typeof media.mimeType !== "string" || typeof media.data !== "string") return null;
   if (!media.mimeType.includes("/") || media.data.length < 12) return null;
+  if (media.data.length > MAX_INLINE_MEDIA_CHARS) return null;
 
   return {
     mimeType: media.mimeType.slice(0, 80),
@@ -117,6 +120,7 @@ export async function POST(request: NextRequest) {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(GEMINI_TUTOR_TIMEOUT_MS),
         body: JSON.stringify({
           systemInstruction: {
             parts: [{ text: getAgentPrompt(subjectId) }],

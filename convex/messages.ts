@@ -1,7 +1,7 @@
-import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
+import { mutation, query } from "./_generated/server";
 
-export const listMessages = queryGeneric({
+export const listMessages = query({
   args: {
     studentSlug: v.string(),
     subjectId: v.optional(v.string()),
@@ -10,21 +10,22 @@ export const listMessages = queryGeneric({
     const rows = args.subjectId
       ? await ctx.db
           .query("messages")
-          .withIndex("by_student_subject", (q) =>
-            q.eq("studentSlug", args.studentSlug),
+          .withIndex("by_student_subject_created_at", (q) =>
+            q.eq("studentSlug", args.studentSlug).eq("subjectId", args.subjectId!),
           )
-          .filter((q) => q.eq(q.field("subjectId"), args.subjectId!))
-          .collect()
+          .order("desc")
+          .take(50)
       : await ctx.db
           .query("messages")
-          .withIndex("by_student", (q) => q.eq("studentSlug", args.studentSlug))
-          .collect();
+          .withIndex("by_student_created_at", (q) => q.eq("studentSlug", args.studentSlug))
+          .order("desc")
+          .take(50);
 
-    return rows.sort((a, b) => a.createdAt - b.createdAt).slice(-50);
+    return rows.reverse();
   },
 });
 
-export const recordMessage = mutationGeneric({
+export const recordMessage = mutation({
   args: {
     studentSlug: v.string(),
     subjectId: v.string(),

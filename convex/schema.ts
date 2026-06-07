@@ -31,7 +31,8 @@ export default defineSchema({
     order: v.number(),
   })
     .index("by_mission_id", ["missionId"])
-    .index("by_subject", ["subjectId"]),
+    .index("by_subject", ["subjectId"])
+    .index("by_active_order", ["active", "order"]),
 
   progress: defineTable({
     studentSlug: v.string(),
@@ -68,7 +69,9 @@ export default defineSchema({
     whatsappUrl: v.string(),
     status: v.union(v.literal("created"), v.literal("sent"), v.literal("approved")),
     createdAt: v.number(),
-  }).index("by_student", ["studentSlug"]),
+  })
+    .index("by_student", ["studentSlug"])
+    .index("by_student_created_at", ["studentSlug", "createdAt"]),
 
   messages: defineTable({
     studentSlug: v.string(),
@@ -79,5 +82,7 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_student", ["studentSlug"])
-    .index("by_student_subject", ["studentSlug", "subjectId"]),
+    .index("by_student_created_at", ["studentSlug", "createdAt"])
+    .index("by_student_subject", ["studentSlug", "subjectId"])
+    .index("by_student_subject_created_at", ["studentSlug", "subjectId", "createdAt"]),
 });

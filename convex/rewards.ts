@@ -1,5 +1,5 @@
-import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
+import { mutation, query } from "./_generated/server";
 
 const DEFAULT_PARENT_NUMBER = "5511994465011";
 
@@ -8,7 +8,7 @@ function buildWhatsappUrl(message: string) {
   return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 }
 
-export const requestReward = mutationGeneric({
+export const requestReward = mutation({
   args: {
     studentSlug: v.string(),
     missionId: v.string(),
@@ -35,15 +35,16 @@ export const requestReward = mutationGeneric({
   },
 });
 
-export const listRewardRequests = queryGeneric({
+export const listRewardRequests = query({
   args: {
     studentSlug: v.string(),
   },
   handler: async (ctx, args) => {
     const requests = await ctx.db
       .query("rewardRequests")
-      .withIndex("by_student", (q) => q.eq("studentSlug", args.studentSlug))
-      .collect();
-    return requests.sort((a, b) => b.createdAt - a.createdAt);
+      .withIndex("by_student_created_at", (q) => q.eq("studentSlug", args.studentSlug))
+      .order("desc")
+      .take(20);
+    return requests;
   },
 });

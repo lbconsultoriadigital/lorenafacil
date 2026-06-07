@@ -1,19 +1,24 @@
-import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
+import { mutation, query } from "./_generated/server";
 
-export const listMissions = queryGeneric({
+export const listMissions = query({
   args: {
     activeOnly: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
+    if (args.activeOnly) {
+      return await ctx.db
+        .query("missions")
+        .withIndex("by_active_order", (q) => q.eq("active", true))
+        .collect();
+    }
+
     const all = await ctx.db.query("missions").collect();
-    return all
-      .filter((mission) => (args.activeOnly ? mission.active : true))
-      .sort((a, b) => a.order - b.order);
+    return all.sort((a, b) => a.order - b.order);
   },
 });
 
-export const completeMission = mutationGeneric({
+export const completeMission = mutation({
   args: {
     studentSlug: v.string(),
     missionId: v.string(),
@@ -28,9 +33,8 @@ export const completeMission = mutationGeneric({
     const existing = await ctx.db
       .query("progress")
       .withIndex("by_student_mission", (q) =>
-        q.eq("studentSlug", args.studentSlug),
+        q.eq("studentSlug", args.studentSlug).eq("missionId", args.missionId),
       )
-      .filter((q) => q.eq(q.field("missionId"), args.missionId))
       .first();
 
     if (!existing) {
@@ -46,9 +50,8 @@ export const completeMission = mutationGeneric({
     const unlocked = await ctx.db
       .query("stickerUnlocks")
       .withIndex("by_student_sticker", (q) =>
-        q.eq("studentSlug", args.studentSlug),
+        q.eq("studentSlug", args.studentSlug).eq("stickerId", mission.stickerId),
       )
-      .filter((q) => q.eq(q.field("stickerId"), mission.stickerId))
       .first();
 
     if (!unlocked) {
@@ -69,7 +72,7 @@ export const completeMission = mutationGeneric({
   },
 });
 
-export const getProgress = queryGeneric({
+export const getProgress = query({
   args: {
     studentSlug: v.string(),
   },

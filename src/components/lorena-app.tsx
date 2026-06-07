@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   BookOpenCheck,
   Camera,
@@ -102,6 +102,9 @@ export function LorenaApp() {
 
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
+  const voiceEnabledRef = useRef(true);
+  const voiceRequestAbortRef = useRef<AbortController | null>(null);
+  const voiceRequestIdRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
@@ -109,6 +112,31 @@ export function LorenaApp() {
   const audioChunksRef = useRef<Blob[]>([]);
   const transcriptRef = useRef("");
   const recordingTimerRef = useRef<number | null>(null);
+  const isFinishingRecordingRef = useRef(false);
+
+  const clearCurrentAudio = useCallback(() => {
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.pause();
+      audioPlayerRef.current = null;
+    }
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+    }
+  }, []);
+
+  const stopTutorVoice = useCallback(() => {
+    voiceRequestIdRef.current += 1;
+    voiceRequestAbortRef.current?.abort();
+    voiceRequestAbortRef.current = null;
+    window.speechSynthesis?.cancel();
+    clearCurrentAudio();
+  }, [clearCurrentAudio]);
+
+  const stopRecordingTracks = useCallback(() => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -122,6 +150,10 @@ export function LorenaApp() {
           setUnlockedStickerIds(Array.isArray(parsed.unlockedStickerIds) ? parsed.unlockedStickerIds : []);
           setMessages(Array.isArray(parsed.messages) ? parsed.messages : initialMessages);
           setRewardRequests(Array.isArray(parsed.rewardRequests) ? parsed.rewardRequests : []);
+          if (typeof parsed.isVoiceEnabled === "boolean") {
+            setIsVoiceEnabled(parsed.isVoiceEnabled);
+            voiceEnabledRef.current = parsed.isVoiceEnabled;
+          }
         } catch {
           window.localStorage.removeItem(STORAGE_KEY);
         }
@@ -130,7 +162,7 @@ export function LorenaApp() {
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [stopTutorVoice]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -143,9 +175,10 @@ export function LorenaApp() {
         unlockedStickerIds,
         messages,
         rewardRequests,
+        isVoiceEnabled,
       }),
     );
-  }, [completedMissionIds, hydrated, messages, rewardRequests, streak, unlockedStickerIds, xp]);
+  }, [completedMissionIds, hydrated, isVoiceEnabled, messages, rewardRequests, streak, unlockedStickerIds, xp]);
 
   useEffect(() => {
     if (!("speechSynthesis" in window)) return;
@@ -158,7 +191,7 @@ export function LorenaApp() {
       stopTutorVoice();
       window.speechSynthesis.onvoiceschanged = null;
     };
-  }, []);
+  }, [stopTutorVoice]);
 
   useEffect(() => {
     return () => {
@@ -169,7 +202,7 @@ export function LorenaApp() {
       }
       recognitionRef.current?.abort();
     };
-  }, []);
+  }, [stopRecordingTracks, stopTutorVoice]);
 
   const selectedSubjectData = subjects.find((subject) => subject.id === selectedSubject) ?? subjects[0];
   const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant");
@@ -282,7 +315,7 @@ export function LorenaApp() {
           subjectId: selectedSubject,
         },
       ]);
-      void speakTutor(answer);
+      setVoiceHint("Resposta pronta. Toque no alto-falante para ouvir.");
     } catch {
       const answer = "Não consegui responder agora. Sua pergunta ficou salva aqui para tentarmos de novo.";
       setMessages((current) => [
@@ -295,7 +328,7 @@ export function LorenaApp() {
           subjectId: selectedSubject,
         },
       ]);
-      void speakTutor(answer);
+      setVoiceHint("Resposta salva. Tente enviar de novo se precisar.");
     } finally {
       setIsSending(false);
     }
@@ -350,6 +383,8 @@ export function LorenaApp() {
 
     if (isSending) return;
 
+    stopTutorVoice();
+
     if (!navigator.mediaDevices?.getUserMedia) {
       setVoiceHint("Este navegador não liberou gravação. Use Digitar por enquanto.");
       return;
@@ -362,6 +397,7 @@ export function LorenaApp() {
       recorderRef.current = recorder;
       audioChunksRef.current = [];
       transcriptRef.current = "";
+      isFinishingRecordingRef.current = false;
 
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) audioChunksRef.current.push(event.data);
@@ -374,7 +410,10 @@ export function LorenaApp() {
       recorder.start();
       setIsListening(true);
       setVoiceHint("Estou ouvindo. Toque em Falar de novo para enviar.");
-      recordingTimerRef.current = window.setTimeout(() => stopVoiceRecording(), 10000);
+      recordingTimerRef.current = window.setTimeout(() => {
+        recordingTimerRef.current = null;
+        stopVoiceRecording();
+      }, 10000);
     } catch {
       setVoiceHint("Para falar comigo, libere o microfone do celular.");
     }
@@ -423,6 +462,7 @@ export function LorenaApp() {
     } catch {
       recognitionRef.current?.abort();
     }
+    recognitionRef.current = null;
 
     const recorder = recorderRef.current;
     if (recorder && recorder.state !== "inactive") {
@@ -435,80 +475,108 @@ export function LorenaApp() {
   }
 
   async function finishVoiceRecording() {
-    stopRecordingTracks();
-    const transcript = transcriptRef.current.trim() || input.trim();
-    const chunks = audioChunksRef.current;
-    audioChunksRef.current = [];
-    recorderRef.current = null;
+    if (isFinishingRecordingRef.current) return;
+    isFinishingRecordingRef.current = true;
 
-    if (transcript) {
-      setInput("");
-      setVoiceHint("Pergunta enviada. Toque para gravar outra.");
-      await sendTutorRequest({
-        message: transcript,
-        mode: "voice",
-        userText: `Eu falei: ${transcript}`,
-      });
-      return;
-    }
+    try {
+      stopRecordingTracks();
+      const transcript = transcriptRef.current.trim() || input.trim();
+      const chunks = audioChunksRef.current;
 
-    if (chunks.length > 0) {
-      const mimeType = chunks[0]?.type || "audio/webm";
-      const blob = new Blob(chunks, { type: mimeType });
-      const dataUrl = await blobToDataUrl(blob);
-      const data = dataUrl.split(",")[1];
-      if (data) {
-        setVoiceHint("Áudio enviado. Toque para gravar outra.");
+      if (transcript) {
+        setInput("");
+        setVoiceHint("Pergunta enviada. A resposta não toca sozinha.");
         await sendTutorRequest({
-          audio: { data, mimeType },
-          message: "Escute minha pergunta de voz e me ajude a estudar.",
+          message: transcript,
           mode: "voice",
-          userText: "Enviei uma pergunta de voz.",
+          userText: `Eu falei: ${transcript}`,
         });
         return;
       }
+
+      if (chunks.length > 0) {
+        const mimeType = chunks[0]?.type || "audio/webm";
+        const blob = new Blob(chunks, { type: mimeType });
+        const dataUrl = await blobToDataUrl(blob);
+        const data = dataUrl.split(",")[1];
+        if (data) {
+          setVoiceHint("Áudio enviado. A resposta não toca sozinha.");
+          await sendTutorRequest({
+            audio: { data, mimeType },
+            message: "Escute minha pergunta de voz e me ajude a estudar.",
+            mode: "voice",
+            userText: "Enviei uma pergunta de voz.",
+          });
+          return;
+        }
+      }
+
+      setVoiceHint("Não ouvi nada. Tente falar pertinho do celular.");
+    } finally {
+      audioChunksRef.current = [];
+      transcriptRef.current = "";
+      recorderRef.current = null;
+      recognitionRef.current = null;
+      isFinishingRecordingRef.current = false;
     }
-
-    setVoiceHint("Não ouvi nada. Tente falar pertinho do celular.");
-  }
-
-  function stopRecordingTracks() {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
   }
 
   function toggleVoice() {
-    setIsVoiceEnabled((enabled) => {
-      if (enabled) stopTutorVoice();
-      return !enabled;
-    });
+    const nextEnabled = !isVoiceEnabled;
+    voiceEnabledRef.current = nextEnabled;
+    setIsVoiceEnabled(nextEnabled);
+
+    if (nextEnabled) {
+      setVoiceHint("Voz ligada. Toque no alto-falante da resposta para ouvir.");
+      return;
+    }
+
+    stopTutorVoice();
+    setVoiceHint("Voz pausada. Nada vai tocar sozinho.");
   }
 
   async function speakTutor(text?: string) {
-    if (!isVoiceEnabled || !text) return;
+    if (!voiceEnabledRef.current || !text) {
+      setVoiceHint("Voz pausada. Ligue no botão de som para ouvir.");
+      return;
+    }
 
     const textToRead = cleanForSpeech(text);
     if (!textToRead) return;
 
     stopTutorVoice();
+    const requestId = ++voiceRequestIdRef.current;
+    const controller = new AbortController();
+    voiceRequestAbortRef.current = controller;
+    setVoiceHint("Preparando voz...");
 
     try {
       const response = await fetch(apiUrl("/api/voice"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({ text: textToRead }),
       });
 
       if (!response.ok) throw new Error("premium voice unavailable");
+      if (!isVoiceRequestActive(requestId)) return;
 
       const audioBlob = await response.blob();
-      await playAudioBlob(audioBlob);
+      if (!isVoiceRequestActive(requestId)) return;
+
+      await playAudioBlob(audioBlob, requestId);
     } catch {
-      speakWithBrowserVoice(textToRead);
+      if (controller.signal.aborted || !isVoiceRequestActive(requestId)) return;
+      speakWithBrowserVoice(textToRead, requestId);
+    } finally {
+      if (voiceRequestAbortRef.current === controller) {
+        voiceRequestAbortRef.current = null;
+      }
     }
   }
 
-  function speakWithBrowserVoice(textToRead: string) {
+  function speakWithBrowserVoice(textToRead: string, requestId: number) {
+    if (!isVoiceRequestActive(requestId)) return;
     if (!("speechSynthesis" in window)) return;
 
     window.speechSynthesis.cancel();
@@ -520,19 +588,24 @@ export function LorenaApp() {
     utterance.rate = 0.92;
     utterance.pitch = 1.05;
     utterance.volume = 1;
+    utterance.onend = () => {
+      if (isVoiceRequestActive(requestId)) setVoiceHint("Resposta pronta. Toque no alto-falante para ouvir de novo.");
+    };
+    utterance.onerror = () => {
+      if (isVoiceRequestActive(requestId)) setVoiceHint("Não consegui tocar a voz agora.");
+    };
     window.speechSynthesis.speak(utterance);
+    setVoiceHint("Tocando resposta...");
   }
 
-  function playAudioBlob(audioBlob: Blob) {
+  function playAudioBlob(audioBlob: Blob, requestId: number) {
     return new Promise<void>((resolve, reject) => {
-      if (audioPlayerRef.current) {
-        audioPlayerRef.current.pause();
-        audioPlayerRef.current = null;
+      if (!isVoiceRequestActive(requestId)) {
+        resolve();
+        return;
       }
-      if (audioUrlRef.current) {
-        URL.revokeObjectURL(audioUrlRef.current);
-        audioUrlRef.current = null;
-      }
+
+      clearCurrentAudio();
 
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
@@ -545,7 +618,10 @@ export function LorenaApp() {
         if (audioPlayerRef.current === audio) audioPlayerRef.current = null;
       };
 
-      audio.onended = cleanup;
+      audio.onended = () => {
+        cleanup();
+        if (isVoiceRequestActive(requestId)) setVoiceHint("Resposta pronta. Toque no alto-falante para ouvir de novo.");
+      };
       audio.onerror = () => {
         cleanup();
         reject(new Error("audio playback failed"));
@@ -553,7 +629,16 @@ export function LorenaApp() {
 
       audio
         .play()
-        .then(() => resolve())
+        .then(() => {
+          if (!isVoiceRequestActive(requestId)) {
+            audio.pause();
+            cleanup();
+            resolve();
+            return;
+          }
+          setVoiceHint("Tocando resposta...");
+          resolve();
+        })
         .catch((error: unknown) => {
           cleanup();
           reject(error);
@@ -561,16 +646,8 @@ export function LorenaApp() {
     });
   }
 
-  function stopTutorVoice() {
-    window.speechSynthesis?.cancel();
-    if (audioPlayerRef.current) {
-      audioPlayerRef.current.pause();
-      audioPlayerRef.current = null;
-    }
-    if (audioUrlRef.current) {
-      URL.revokeObjectURL(audioUrlRef.current);
-      audioUrlRef.current = null;
-    }
+  function isVoiceRequestActive(requestId: number) {
+    return voiceEnabledRef.current && voiceRequestIdRef.current === requestId;
   }
 
   return (

@@ -10,6 +10,7 @@ const DEFAULT_TTS_INSTRUCTIONS =
   "Leia em portugues do Brasil como uma voz humana, natural, acolhedora e expressiva para uma menina de 9 anos. " +
   "Use ritmo calmo, diccao clara, energia leve, pequenas pausas entre ideias e tom de tutor gentil. " +
   "Nao leia marcadores de markdown. Nao soe como robo, atendimento telefonico ou narracao artificial.";
+const GEMINI_TTS_TIMEOUT_MS = 22000;
 
 type GeminiInlineData = {
   data?: string;
@@ -40,7 +41,7 @@ export async function POST(request: NextRequest) {
   const model = process.env.GEMINI_TTS_MODEL?.trim() || DEFAULT_TTS_MODEL;
   const voice = process.env.GEMINI_TTS_VOICE?.trim() || DEFAULT_TTS_VOICE;
   const instructions = process.env.GEMINI_TTS_INSTRUCTIONS?.trim() || DEFAULT_TTS_INSTRUCTIONS;
-  const promptForVoice = `${instructions}\n\nTexto para narrar:\n"${text.slice(0, 4200)}"`;
+  const promptForVoice = `${instructions}\n\nTexto para narrar:\n"${text.slice(0, 1800)}"`;
 
   try {
     const response = await fetch(
@@ -48,6 +49,7 @@ export async function POST(request: NextRequest) {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(GEMINI_TTS_TIMEOUT_MS),
         body: JSON.stringify({
           contents: [
             {
